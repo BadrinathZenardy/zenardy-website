@@ -128,8 +128,26 @@ def download_asset(url: str):
         save(path, r.content)
 
 
+def sitemap_pages() -> list[str]:
+    """Page URLs from the Yoast sitemap index, so unlinked pages are mirrored too."""
+    pages = []
+    r = fetch(f"https://{HOST}/sitemap_index.xml")
+    if r is None:
+        return pages
+    for sm in re.findall(r"<loc>([^<]+)</loc>", r.text):
+        sr = fetch(sm.strip())
+        if sr is None:
+            continue
+        for loc in re.findall(r"<loc>([^<]+)</loc>", sr.text):
+            cand = norm_page(loc.strip())
+            if cand:
+                pages.append(cand)
+    return pages
+
+
 def crawl():
-    queue = [START]
+    queue = [START] + sitemap_pages()
+    queued = set(queue)
     while queue:
         url = queue.pop(0)
         if url in pages_done:
@@ -145,7 +163,8 @@ def crawl():
         # discover linked pages
         for m in re.finditer(r"""href=["']([^"'#]+)["']""", html):
             cand = norm_page(urljoin(url, m.group(1)))
-            if cand and cand not in pages_done and len(pages_done) + len(queue) < 200:
+            if cand and cand not in queued and len(queued) < 500:
+                queued.add(cand)
                 queue.append(cand)
         # discover + download assets
         for a in collect_asset_urls(html, url):
